@@ -3,115 +3,89 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Imports\ClientesImport;
+use App\Models\Cliente;
 use Illuminate\Support\Facades\Log;
-use PhpOffice\PhpSpreadsheet\IOFactory;
+use Illuminate\Support\Facades\DB;
 
 class ImportController extends Controller
 {
-    public function convertExcelToJson(Request $request)
+    /**
+     * Mostrar la vista de carga de archivo Excel y la lista de clientes.
+     */
+    public function index()
     {
         try {
-            // Validar el archivo
-            $request->validate([
-                'file' => 'required|file|mimes:xls,xlsx|max:20480',
-            ]);
-
-            $file = $request->file('file')->getRealPath();
-
-            // Cargar el archivo Excel
-            $spreadsheet = IOFactory::load($file);
-            $sheetData = $spreadsheet->getActiveSheet()->toArray(null, true, true, true);
-
-            if (empty($sheetData) || !isset($sheetData[0])) {
-                return response()->json(['message' => 'El archivo está vacío o tiene un formato inválido.'], 422);
-            }
-
-            // Obtener encabezados y normalizarlos
-            $headers = array_map('trim', array_shift($sheetData));
-            $normalizedHeaders = array_map(fn($h) => $this->normalizeHeader($h), $headers);
-
-            // Procesar filas
-            $data = [];
-            $errors = [];
-
-            foreach ($sheetData as $index => $row) {
-                try {
-                    $normalizedRow = array_combine($normalizedHeaders, array_values($row));
-                    $data[] = $this->validateAndTransformRow($normalizedRow);
-                } catch (\Exception $e) {
-                    $errors[] = "Fila " . ($index + 2) . ": " . $e->getMessage();
-                }
-            }
-
-            return response()->json([
-                'validData' => $data,
-                'errors' => $errors,
-            ]);
+            // Obtener todos los clientes
+            $clientes = Cliente::all();
+            return view('upload', compact('clientes'));
         } catch (\Exception $e) {
-            Log::error("Error al procesar archivo: {$e->getMessage()}");
-            return response()->json(['message' => 'Error interno al procesar el archivo.'], 500);
+            Log::error('Error al cargar los datos: ' . $e->getMessage());
+            return redirect()->back()->withErrors('Error al cargar los datos: ' . $e->getMessage());
         }
     }
 
-    // Validar y transformar cada fila
-    private function validateAndTransformRow($row)
+    /**
+     * Procesar el archivo Excel cargado e importar datos.
+     */
+    public function uploadExcel(Request $request)
     {
-        $transformed = [];
-        foreach ($row as $key => $value) {
-            switch ($key) {
-                case 'Codigo_Cliente':
-                    $transformed[$key] = $value ?: 'GEN-' . uniqid();
-                    break;
-                case 'Edad':
-                    if (!is_numeric($value)) {
-                        throw new \Exception("La edad debe ser un número.");
-                    }
-                    $transformed[$key] = (int)$value;
-                    break;
-                case 'Fecha_Nacimiento':
-                    $transformed[$key] = $this->formatDate($value);
-                    break;
-                default:
-                    $transformed[$key] = trim($value);
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv|max:20480',
+        ]);
+
+        try {
+            $import = new ClientesImport();
+            Excel::import($import, $request->file('file'));
+
+            $importedData = $import->getImportedData();
+
+            foreach ($importedData as $data) {
+                Cliente::updateOrCreate(
+                    ['id' => $data['id']], // Ajusta el campo de identificación único según tu modelo
+                    $data
+                );
             }
+
+            return response()->json(['message' => 'Datos importados exitosamente!', 'status' => 'success']);
+        } catch (\Exception $e) {
+            Log::error('Error al procesar el archivo: ' . $e->getMessage());
+            return response()->json(['message' => 'Error al procesar el archivo: ' . $e->getMessage(), 'status' => 'error'], 500);
         }
-        return $transformed;
     }
 
-    // Normalizar nombres de encabezados (sin espacios, tildes, etc.)
-    private function normalizeHeader($header)
-    {
-        $header = preg_replace('/\s+/', '_', $header); // Reemplaza espacios con _
-        $header = iconv('UTF-8', 'ASCII//TRANSLIT', $header); // Elimina acentos
-        return preg_replace('/[^A-Za-z0-9_]/', '', $header); // Remueve caracteres especiales
-    }
-
-    // Formatear fechas al formato Y-m-d
-    private function formatDate($date)
-    {
-        if (!$date) return null;
-
-        $parsed = \DateTime::createFromFormat('d/m/Y', $date) ?: \DateTime::createFromFormat('Y-m-d', $date);
-        if (!$parsed) {
-            throw new \Exception("Fecha no válida: {$date}");
-        }
-        return $parsed->format('Y-m-d');
-    }
-
+    /**
+     * Insertar datos validados manualmente en la base de datos.
+     */
     public function insertValidatedData(Request $request)
     {
-        try {
-            $data = $request->input('data');
-            if (empty($data)) {
-                return response()->json(['message' => 'No se proporcionaron datos válidos.'], 422);
-            }
+        $data = $request->input('data');
 
+        if (empty($data)) {
+            return response()->json(['message' => 'No se proporcionaron datos válidos.', 'status' => 'error'], 422);
+        }
+
+        try {
             DB::table('clientes')->insert($data);
-            return response()->json(['message' => 'Datos insertados correctamente.', 'total' => count($data)]);
+            return response()->json(['message' => 'Datos insertados correctamente.', 'total' => count($data), 'status' => 'success']);
         } catch (\Exception $e) {
-            Log::error("Error al insertar datos: {$e->getMessage()}");
-            return response()->json(['message' => 'Error al insertar los datos.'], 500);
+            Log::error('Error al insertar los datos: ' . $e->getMessage());
+            return response()->json(['message' => 'Error al insertar los datos.', 'error' => $e->getMessage(), 'status' => 'error'], 500);
+        }
+    }
+
+    /**
+     * Insertar un cliente manualmente (opcional).
+     */
+    public function insertCliente(array $data)
+    {
+        try {
+            Cliente::create($data);
+            return response()->json(['message' => 'Cliente insertado exitosamente'], 201);
+        } catch (\Exception $e) {
+            Log::error('Error al insertar cliente: ' . $e->getMessage());
+            return response()->json(['message' => 'Error al insertar cliente', 'error' => $e->getMessage()], 500);
         }
     }
 }

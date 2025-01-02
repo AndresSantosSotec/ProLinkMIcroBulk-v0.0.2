@@ -48,158 +48,201 @@
 
     <!-- Contenedor para mostrar datos válidos -->
     <div id="data-display" class="mt-4"></div>
+
+    <!-- Contenedor para mostrar alertas -->
+    <div id="alert-container" class="mt-4"></div>
 </div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Configurar CSRF Token
-        $.ajaxSetup({
-            headers: {
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute(
-                    'content')
-            }
-        });
-
-        // Alternar entre Carpeta Local y Bucket AWS
-        $('input[name="config_step1"]').change(function() {
-            if ($(this).val() === 'local') {
-                $('#local-config-step1').show();
-                $('#aws-config-step1').hide();
-            } else {
-                $('#local-config-step1').hide();
-                $('#aws-config-step1').show();
-            }
-        });
-
-        // Habilitar botón solo si hay archivo seleccionado
-        $('#local-file-step1').change(function() {
-            const file = $(this).prop('files')[0];
-            validateFile(file);
-        });
-
-        // Validar archivo antes de enviar
-        function validateFile(file) {
-            const allowedExtensions = ['csv', 'xls', 'xlsx'];
-            const fileExtension = file.name.split('.').pop().toLowerCase();
-            const maxFileSize = 20 * 1024 * 1024; // 20 MB
-
-            if (!allowedExtensions.includes(fileExtension)) {
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Formato no permitido',
-                    text: 'Solo se permiten archivos CSV, XLS o XLSX.'
-                });
-                $('#local-file-step1').val('');
-                $('.import-btn[data-step="1"]').prop('disabled', true);
-                return false;
-            }
-
-            if (file.size > maxFileSize) {
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Archivo demasiado grande',
-                    text: 'El archivo debe ser menor a 20 MB.'
-                });
-                $('#local-file-step1').val('');
-                $('.import-btn[data-step="1"]').prop('disabled', true);
-                return false;
-            }
-
-            $('.import-btn[data-step="1"]').prop('disabled', false);
-            return true;
-        }
-
-        // Enviar archivo al servidor
-        $('.import-btn[data-step="1"]').click(function() {
-            const fileInput = $('#local-file-step1');
-            const file = fileInput.prop('files')[0];
-
-            if (!validateFile(file)) return;
-
-            Swal.fire({
-                title: 'Cargando...',
-                text: 'Procesando archivo, por favor espera.',
-                allowOutsideClick: false,
-                didOpen: () => Swal.showLoading()
-            });
-
-            const formData = new FormData();
-            formData.append('file', file);
-
-            $.ajax({
-                url: '/convert-excel-to-json',
-                method: 'POST',
-                data: formData,
-                processData: false,
-                contentType: false,
-                success: function(response) {
-                    Swal.close();
-
-                    if (response.validData.length > 0) {
-                        displayValidData(response.validData, response.errors);
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'Datos procesados',
-                            text: 'El archivo fue procesado con éxito.',
-                        });
-                    }
-
-                    if (response.errors.length > 0) {
-                        Swal.fire({
-                            icon: 'error',
-                            title: 'Errores en el archivo',
-                            html: `<ul>${response.errors.map(e => `<li>${e}</li>`).join('')}</ul>`,
-                        });
-                    }
-                },
-                error: function(xhr) {
-                    Swal.fire({
-                        icon: 'error',
-                        title: 'Error',
-                        text: xhr.responseJSON?.message ||
-                            'Hubo un problema al procesar el archivo.'
-                    });
-                }
-            });
-        });
-
-        // Mostrar datos válidos y errores en una tabla
-        function displayValidData(data, errors) {
-            const table = $('<table>').addClass('table table-bordered table-hover');
-            const thead = $('<thead>');
-            const tbody = $('<tbody>');
-
-            if (data.length > 0) {
-                const headers = Object.keys(data[0]);
-                const headerRow = $('<tr>');
-                headers.forEach(header => headerRow.append($('<th>').text(header)));
-                headerRow.append($('<th>').text('Errores')); // Columna adicional para errores
-                thead.append(headerRow);
-
-                data.forEach((row, index) => {
-                    const rowElement = $('<tr>');
-                    headers.forEach(header => {
-                        const cell = $('<td>').text(row[header] || '');
-                        rowElement.append(cell);
-                    });
-
-                    // Agregar errores si existen
-                    if (errors[index]) {
-                        rowElement.addClass('table-danger');
-                        const errorCell = $('<td>').html(errors[index].join('<br>'));
-                        rowElement.append(errorCell);
-                    } else {
-                        rowElement.append($('<td>').text('')); // Celda vacía si no hay error
-                    }
-
-                    tbody.append(rowElement);
-                });
-            } else {
-                tbody.append($('<tr>').append($('<td>').attr('colspan', '100%').text('No hay datos válidos.')));
-            }
-
-            table.append(thead).append(tbody);
-            $('#data-display').html(table);
+document.addEventListener('DOMContentLoaded', function () {
+    // Configurar CSRF Token
+    $.ajaxSetup({
+        headers: {
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
         }
     });
+
+    // Alternar entre Carpeta Local y Bucket AWS
+    $('input[name="config_step1"]').change(function () {
+        if ($(this).val() === 'local') {
+            $('#local-config-step1').show();
+            $('#aws-config-step1').hide();
+        } else {
+            $('#local-config-step1').hide();
+            $('#aws-config-step1').show();
+        }
+    });
+
+    // Habilitar botón solo si hay archivo seleccionado
+    $('#local-file-step1').change(function () {
+        const file = $(this).prop('files')[0];
+        validateFile(file);
+    });
+
+    // Validar archivo antes de enviar
+    function validateFile(file) {
+        const allowedExtensions = ['csv', 'xls', 'xlsx'];
+        const fileExtension = file.name.split('.').pop().toLowerCase();
+        const maxFileSize = 20 * 1024 * 1024; // 20 MB
+
+        if (!allowedExtensions.includes(fileExtension)) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Formato no permitido',
+                text: 'Solo se permiten archivos CSV, XLS o XLSX.'
+            });
+            $('#local-file-step1').val('');
+            $('.import-btn[data-step="1"]').prop('disabled', true);
+            return false;
+        }
+
+        if (file.size > maxFileSize) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Archivo demasiado grande',
+                text: 'El archivo debe ser menor a 20 MB.'
+            });
+            $('#local-file-step1').val('');
+            $('.import-btn[data-step="1"]').prop('disabled', true);
+            return false;
+        }
+
+        $('.import-btn[data-step="1"]').prop('disabled', false);
+        return true;
+    }
+
+    // Enviar archivo al servidor
+    $('.import-btn[data-step="1"]').click(function () {
+        const fileInput = $('#local-file-step1');
+        const file = fileInput.prop('files')[0];
+
+        if (!validateFile(file)) return;
+
+        Swal.fire({
+            title: 'Cargando...',
+            text: 'Procesando archivo, por favor espera.',
+            allowOutsideClick: false,
+            didOpen: () => Swal.showLoading()
+        });
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        $.ajax({
+            url: '{{ route('upload.excel.file') }}',
+            method: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function (response) {
+                Swal.close();
+                Swal.fire({
+                    icon: response.status,
+                    title: response.status === 'success' ? 'Éxito' : 'Error',
+                    text: response.message,
+                });
+
+                if (response.status === 'success' && response.validData.length > 0) {
+                    displayValidData(response.validData, response.errors);
+                }
+            },
+            error: function (xhr) {
+                Swal.close();
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: xhr.responseJSON?.message || 'Hubo un problema al procesar el archivo.'
+                });
+            }
+        });
+    });
+
+    // Insertar datos validados en la base de datos
+    $('#insert-validated-data').click(function () {
+        const validData = $('#data-display').data('validatedData');
+        if (!validData || !validData.length) {
+            Swal.fire({
+                icon: 'error',
+                title: 'No hay datos válidos',
+                text: 'Primero debe importar y validar un archivo.'
+            });
+            return;
+        }
+
+        $.ajax({
+            url: '{{ route('insert-validated-data') }}',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ data: validData }),
+            success: function (response) {
+                Swal.fire({
+                    icon: response.status,
+                    title: response.status === 'success' ? 'Éxito' : 'Error',
+                    text: response.message,
+                });
+            },
+            error: function (xhr) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: xhr.responseJSON?.message || 'Hubo un problema al insertar los datos.'
+                });
+            }
+        });
+    });
+
+    // Mostrar datos válidos y errores en una tabla
+    function displayValidData(data, errors) {
+        const table = $('<table>').addClass('table table-bordered table-hover');
+        const thead = $('<thead>');
+        const tbody = $('<tbody>');
+
+        if (data.length > 0) {
+            const headers = Object.keys(data[0]);
+            const headerRow = $('<tr>');
+            headers.forEach(header => headerRow.append($('<th>').text(header)));
+            headerRow.append($('<th>').text('Errores')); // Columna adicional para errores
+            thead.append(headerRow);
+
+            data.forEach((row, index) => {
+                const rowElement = $('<tr>');
+                headers.forEach(header => {
+                    const cell = $('<td>').text(row[header] || '');
+                    rowElement.append(cell);
+                });
+
+                // Agregar errores si existen
+                if (errors[index]) {
+                    rowElement.addClass('table-danger');
+                    const errorCell = $('<td>').html(errors[index].join('<br>'));
+                    rowElement.append(errorCell);
+                } else {
+                    rowElement.append($('<td>').text('')); // Celda vacía si no hay error
+                }
+
+                tbody.append(rowElement);
+            });
+
+            // Almacenar datos validados en un elemento
+            $('#data-display').data('validatedData', data);
+        } else {
+            tbody.append($('<tr>').append($('<td>').attr('colspan', '100%').text('No hay datos válidos.')));
+        }
+
+        table.append(thead).append(tbody);
+        $('#data-display').html(table);
+    }
+
+    // Mostrar alerta
+    function displayAlert(message, type) {
+        const alertContainer = $('#alert-container');
+        const alert = $(`
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        `);
+        alertContainer.html(alert);
+    }
+});
 </script>

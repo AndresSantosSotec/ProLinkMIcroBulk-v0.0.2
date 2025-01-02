@@ -80,8 +80,6 @@ Route::get('/get-configuration/{configType}/{configStep}', [ConfigurationControl
 // *--Rutas para realizar las importaciones de las carga de las bases de datos--*
 
 //--Ruta para la realziacion de la importacion de clientes 
-// Convertir Excel a JSON y validar datos
-Route::post('/convert-excel-to-json', [ImportController::class, 'convertExcelToJson'])->name('convert.excel.to.json');
-
-// Insertar datos validados
-Route::post('/import-clientes', [ImportController::class, 'insertValidatedData'])->name('import.clientes');
+Route::get('/upload', [ImportController::class, 'index'])->name('upload.excel');
+Route::post('/upload-excel', [ImportController::class, 'uploadExcel'])->name('upload.excel.file');
+Route::post('/insert-validated-data', [ImportController::class, 'insertValidatedData'])->name('insert-validated-data'); // Asegúrate de este nombre
